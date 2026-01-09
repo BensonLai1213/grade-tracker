@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>☁️ 雲端同步 - 期末作業進度</title>
+    <style>
+        /* 樣式保持不變，為了版面整潔我省略重複的 CSS，直接沿用上一版的即可 */
+        :root { --primary: #4a90e2; --success: #2ecc71; --bg: #f5f7fa; --card-bg: #ffffff; --text: #2c3e50; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 600px; }
+        h1 { text-align: center; color: var(--text); margin-bottom: 30px; }
+        .status-indicator { text-align: center; font-size: 0.8rem; margin-bottom: 20px; color: #888; }
+        .status-indicator.connected { color: var(--success); }
+        
+        .input-group { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        input { padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; }
+        #newItemName { flex: 2; min-width: 120px; }
+        #newItemQty { flex: 1; min-width: 60px; }
+        button.add-btn { background-color: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button.add-btn:hover { background-color: #357abd; }
+        
+        .task-list { display: flex; flex-direction: column; gap: 15px; }
+        .card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: transform 0.2s; position: relative; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .task-name { font-size: 1.1rem; font-weight: bold; }
+        .task-stats { font-size: 0.9rem; color: #666; }
+        
+        .progress-container { height: 20px; background-color: #e0e0e0; border-radius: 10px; overflow: hidden; margin-bottom: 15px; position: relative; }
+        .progress-bar { height: 100%; background-color: var(--primary); width: 0%; transition: width 0.3s ease, background-color 0.3s ease; display: flex; align-items: center; justify-content: flex-end; }
+        .progress-bar.completed { background-color: var(--success); }
+        .progress-text { position: absolute; width: 100%; text-align: center; font-size: 12px; line-height: 20px; color: #333; font-weight: bold; }
+        
+        .controls { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+        .btn-circle { width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; background-color: #f0f0f0; color: #333; transition: all 0.2s; }
+        .btn-circle:hover { background-color: #e0e0e0; transform: scale(1.1); }
+        .btn-minus { color: #e74c3c; }
+        .btn-plus { color: #2ecc71; background-color: #e8f8f5; }
+        .btn-delete { background: none; border: none; color: #999; cursor: pointer; font-size: 14px; text-decoration: underline; margin-right: auto; }
+        .btn-delete:hover { color: #e74c3c; }
+        
+        .reset-section { margin-top: 40px; text-align: center; }
+        .btn-reset { background: none; border: 1px solid #ccc; padding: 5px 15px; color: #888; cursor: pointer; border-radius: 4px; font-size: 0.8rem; }
+        
+        /* Loading 遮罩 */
+        #loader { position: fixed; top:0; left:0; width:100%; height:100%; background:white; display:flex; justify-content:center; align-items:center; z-index:9999; }
+    </style>
+</head>
+<body>
+
+<div id="loader">資料同步中...</div>
+
+<div class="container">
+    <h1>📝 雲端同步進度板</h1>
+    <div id="status" class="status-indicator">正在連接資料庫...</div>
+
+    <div class="input-group">
+        <input type="text" id="newItemName" placeholder="輸入項目名稱">
+        <input type="number" id="newItemQty" placeholder="數量" min="1">
+        <button class="add-btn" onclick="addItem()">新增</button>
+    </div>
+
+    <div id="taskList" class="task-list"></div>
+
+    <div class="reset-section">
+        <button class="btn-reset" onclick="resetData()">⚠️ 重置回預設值 (所有人的畫面都會重置)</button>
+    </div>
+</div>
+
+<script type="module">
+    // 1. 引入 Firebase 必要模組
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    // =========================================================
+    // 🔴 請將下方替換為您從 Firebase Console 複製的 Config
+    // =========================================================
+    	const firebaseConfig = {
+  	apiKey: "AIzaSyCW6AD52wojUY3we5StqtOILEnIgvY49cM",
+  	authDomain: "mrs-fu-gogo.firebaseapp.com",
+  	databaseURL: "https://mrs-fu-gogo-default-rtdb.firebaseio.com",
+  	projectId: "mrs-fu-gogo",
+  	storageBucket: "mrs-fu-gogo.firebasestorage.app",
+  	messagingSenderId: "1061778595200",
+ 	appId: "1:1061778595200:web:f5ef717262242009277565",
+  	measurementId: "G-3PTSJ28W06"
+	};
+    // =========================================================
+
+    // 初始化 Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const tasksRef = ref(db, 'grades_v1'); // 資料庫路徑
+
+    let tasks = [];
+    
+    // 預設資料
+    const defaultData = [
+        { id: 1, name: '總評語', total: 20, current: 0 },
+        { id: 2, name: '輔導紀錄', total: 20, current: 0 },
+        { id: 3, name: '平時成績', total: 20, current: 0 },
+        { id: 4, name: '段考成績', total: 20, current: 0 },
+        { id: 5, name: '作文', total: 120, current: 0 }
+    ];
+
+    const listElement = document.getElementById('taskList');
+    const statusElement = document.getElementById('status');
+    const loader = document.getElementById('loader');
+
+    // 2. 監聽資料庫變化 (這是即時同步的核心)
+    onValue(tasksRef, (snapshot) => {
+        const data = snapshot.val();
+        
+        statusElement.innerText = "🟢 已連線至雲端資料庫";
+        statusElement.classList.add('connected');
+        loader.style.display = 'none';
+
+        if (data) {
+            // 資料庫有資料，轉成陣列 (因為 Firebase 儲存陣列有時會變成 Object)
+            tasks = Array.isArray(data) ? data : Object.values(data);
+        } else {
+            // 資料庫是空的 (第一次使用)，寫入預設值
+            tasks = defaultData;
+            set(tasksRef, defaultData);
+        }
+        render(); // 重新渲染畫面
+    }, (error) => {
+        statusElement.innerText = "🔴 連線失敗：" + error.message;
+        loader.style.display = 'none';
+    });
+
+    // 3. 渲染畫面 (跟之前一樣)
+    function render() {
+        listElement.innerHTML = '';
+        
+        // 確保 tasks 是陣列且過濾掉空值 (Firebase 刪除陣列中間元素時會留 null)
+        const validTasks = tasks.filter(t => t); 
+        
+        validTasks.forEach((task, index) => {
+            // 注意：這裡的 index 是顯示用的，更新資料庫要用原始 ID 或是整個重寫
+            // 為了簡單，我們這裡操作整個陣列再回寫
+            
+            const percent = Math.min(100, Math.round((task.current / task.total) * 100));
+            const isCompleted = percent === 100;
+            
+            const html = `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="task-name">${task.name} ${isCompleted ? '✅' : ''}</span>
+                        <span class="task-stats">${task.current} / ${task.total} (${percent}%)</span>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-bar ${isCompleted ? 'completed' : ''}" style="width: ${percent}%"></div>
+                        <div class="progress-text">${percent}%</div>
+                    </div>
+                    <div class="controls">
+                        <button class="btn-delete" id="del-${index}">刪除</button>
+                        <button class="btn-circle btn-minus" id="minus-${index}">-</button>
+                        <button class="btn-circle btn-plus" id="plus-${index}">+</button>
+                    </div>
+                </div>
+            `;
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            listElement.appendChild(div);
+
+            // 綁定事件 (因為用 module type script，不能直接用 onclick)
+            div.querySelector(`#plus-${index}`).onclick = () => updateProgress(index, 1);
+            div.querySelector(`#minus-${index}`).onclick = () => updateProgress(index, -1);
+            div.querySelector(`#del-${index}`).onclick = () => deleteItem(index);
+        });
+    }
+
+    // 4. 更新進度 -> 寫入資料庫
+    window.updateProgress = function(index, change) {
+        // 重新讀取當前狀態，避免舊資料覆蓋 (雖然 onValue 會保持更新，但安全起見)
+        const validTasks = tasks.filter(t => t);
+        const task = validTasks[index];
+        let newValue = task.current + change;
+        
+        if (newValue < 0) newValue = 0;
+        if (newValue > task.total) newValue = task.total;
+
+        task.current = newValue;
+        
+        // 將更新後的整個陣列寫回 Firebase
+        set(tasksRef, validTasks);
+    }
+
+    // 5. 新增項目 -> 寫入資料庫
+    window.addItem = function() {
+        const nameInput = document.getElementById('newItemName');
+        const qtyInput = document.getElementById('newItemQty');
+        const name = nameInput.value.trim();
+        const qty = parseInt(qtyInput.value);
+
+        if (!name || isNaN(qty) || qty <= 0) return alert('輸入有誤');
+
+        const validTasks = tasks.filter(t => t);
+        validTasks.push({ id: Date.now(), name: name, total: qty, current: 0 });
+        
+        set(tasksRef, validTasks); // 同步到雲端
+        nameInput.value = '';
+        qtyInput.value = '';
+    }
+
+    // 6. 刪除項目
+    window.deleteItem = function(index) {
+        if(confirm('確定刪除？')) {
+            const validTasks = tasks.filter(t => t);
+            validTasks.splice(index, 1);
+            set(tasksRef, validTasks); // 同步到雲端
+        }
+    }
+
+    // 7. 重置
+    window.resetData = function() {
+        if(confirm('⚠️ 警告：這會把所有人的畫面都重置回初始狀態！')) {
+            set(tasksRef, defaultData);
+        }
+    }
+</script>
+
+</body>
+</html>
